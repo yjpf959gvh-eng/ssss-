@@ -28,6 +28,7 @@ import {
   BoostersInventory,
   ClearedTileBurst,
   FloatingPopup,
+  FlyingGoalOrb,
   GemColor,
   GoalType,
   LevelConfig,
@@ -102,6 +103,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [activeBooster, setActiveBooster] = useState<ActiveBooster>(null);
   const [effects, setEffects] = useState<VisualEffect[]>([]);
   const [clearedBursts, setClearedBursts] = useState<ClearedTileBurst[]>([]);
+  const [flyingOrbs, setFlyingOrbs] = useState<FlyingGoalOrb[]>([]);
+  const [goalPulseIdx, setGoalPulseIdx] = useState<number | null>(null);
+  const [comboBanner, setComboBanner] = useState<string | null>(null);
+  const [victoryBanner, setVictoryBanner] = useState<string | null>(null);
   const [popups, setPopups] = useState<FloatingPopup[]>([]);
   const [shaking, setShaking] = useState(false);
   const [invalidPair, setInvalidPair] = useState<string | null>(null);
@@ -165,6 +170,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setActiveBooster(null);
     setEffects([]);
     setClearedBursts([]);
+    setFlyingOrbs([]);
+    setGoalPulseIdx(null);
+    setComboBanner(null);
+    setVictoryBanner(null);
     setPopups([]);
     setHintPair(null);
     setOutOfMovesModal(false);
@@ -227,7 +236,34 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       if (mountedRef.current) {
         setClearedBursts((prev) => prev.filter((b) => !ids.has(b.id)));
       }
-    }, 340);
+    }, 360);
+  };
+
+  const pushGoalOrbs = (orbs: FlyingGoalOrb[]) => {
+    if (orbs.length === 0) return;
+    setFlyingOrbs((prev) => [...prev, ...orbs]);
+    const ids = new Set(orbs.map((o) => o.id));
+    window.setTimeout(() => {
+      if (mountedRef.current) {
+        sound.playCollectPing();
+        setGoalPulseIdx(orbs[0].targetIdx);
+        window.setTimeout(() => {
+          if (mountedRef.current) setGoalPulseIdx(null);
+        }, 220);
+        setFlyingOrbs((prev) => prev.filter((o) => !ids.has(o.id)));
+      }
+    }, 310);
+  };
+
+  const showComboBanner = (combo: number) => {
+    const label = PRAISE_LABELS[Math.min(combo - 2, PRAISE_LABELS.length - 1)];
+    const text = `${label} 连消 ×${combo}`;
+    setComboBanner(text);
+    window.setTimeout(() => {
+      if (mountedRef.current) {
+        setComboBanner((curr) => (curr === text ? null : curr));
+      }
+    }, 850);
   };
 
   const pushPopup = (row: number, col: number, text: string, tone: FloatingPopup['tone']) => {
@@ -306,14 +342,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     let totalClearedHoney = initialClearedHoney;
     let combo = 1;
 
-    // Wait for shatter burst before dropping tiles down
-    await sleep(170);
+    // Rhythmic breather to savor shatter, powerup forge, and flying goal orbs
+    await sleep(235);
     if (!mountedRef.current) return;
 
     // Drop existing tiles & drop new tiles from above top edge
     currBoard = applyGravityAndRefill(currBoard, palette);
     setBoard(currBoard);
-    await sleep(270);
+    await sleep(310);
     if (!mountedRef.current) return;
 
     while (true) {
@@ -334,22 +370,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       setGoalProgress(currProg);
       pushEffect(step.effects);
       pushClearedBursts(step.clearedBursts);
+      pushGoalOrbs(step.goalOrbs);
       playSoundsForStep(step.triggeredPowerUps, step.hitObstacle, step.spawnedPowerUps, combo);
 
       const anchor = clusters[0].cells[0];
       if (combo >= 2) {
+        showComboBanner(combo);
         const praise = PRAISE_LABELS[Math.min(combo - 2, PRAISE_LABELS.length - 1)];
         pushPopup(anchor.row, anchor.col, `${praise} ×${combo}`, 'combo');
       } else {
         pushPopup(anchor.row, anchor.col, `+${gained}`, 'score');
       }
 
-      await sleep(175);
+      await sleep(240);
       if (!mountedRef.current) return;
 
       currBoard = applyGravityAndRefill(currBoard, palette);
       setBoard(currBoard);
-      await sleep(265);
+      await sleep(305);
       if (!mountedRef.current) return;
     }
 
@@ -362,22 +400,93 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           setBoard(currBoard);
           sound.playObstacleHit();
           pushPopup(spreadRes.spreadAt.row, spreadRes.spreadAt.col, '蜂蜜蔓延!', 'praise');
-          await sleep(160);
+          await sleep(200);
           if (!mountedRef.current) return;
         }
       }
     }
 
     if (checkAllGoalsComplete(currProg)) {
-      const moveBonus = newMovesLeft * 250;
-      const finalScore = currScore + moveBonus;
-      if (moveBonus > 0) {
-        setScore(finalScore);
-        showBanner(`通关成功！剩余 ${newMovesLeft} 步转化 +${moveBonus} 分`);
-      }
+      // Phase 1: Big Victory Banner
+      setVictoryBanner('目标达成！');
       sound.playWin();
-      await sleep(550);
+      await sleep(680);
       if (!mountedRef.current) return;
+
+      // Phase 2: Bonus Time — Remaining Moves turn into celebratory fireworks!
+      let finalScore = currScore;
+      let rem = newMovesLeft;
+      if (rem > 0) {
+        setVictoryBanner('剩余步数礼花狂欢！');
+        const fireworkSteps = Math.min(rem, 10);
+        const pointsPerStep = Math.round((rem * 250) / fireworkSteps);
+
+        for (let i = 0; i < fireworkSteps; i++) {
+          if (!mountedRef.current) return;
+          const activeCells: Array<{ row: number; col: number; color: GemColor | null }> = [];
+          for (let r = 0; r < currBoard.length; r++) {
+            for (let c = 0; c < (currBoard[r]?.length || 0); c++) {
+              if (currBoard[r][c].active && currBoard[r][c].tile) {
+                activeCells.push({ row: r, col: c, color: currBoard[r][c].tile!.color });
+              }
+            }
+          }
+          const target =
+            activeCells[Math.floor(Math.random() * activeCells.length)] || {
+              row: Math.floor(level.rows / 2),
+              col: Math.floor(level.cols / 2),
+              color: 'yellow' as GemColor,
+            };
+
+          const working = cloneBoard(currBoard);
+          if (working[target.row]?.[target.col]) {
+            working[target.row][target.col].tile = null;
+          }
+          currBoard = working;
+          finalScore += pointsPerStep;
+          const displayMoves = Math.max(0, Math.round(rem * (1 - (i + 1) / fireworkSteps)));
+
+          setBoard(currBoard);
+          setMovesLeft(displayMoves);
+          setScore(finalScore);
+          sound.playFirework(i);
+          pushEffect([
+            { id: `fw_s_${i}`, kind: 'shockwave', row: target.row, col: target.col },
+            {
+              id: `fw_b_${i}`,
+              kind: i % 2 === 0 ? 'beam_h' : 'beam_v',
+              row: target.row,
+              col: target.col,
+            },
+          ]);
+          pushClearedBursts([
+            {
+              id: `fw_c_${i}`,
+              row: target.row,
+              col: target.col,
+              color: target.color || 'yellow',
+            },
+          ]);
+          pushPopup(target.row, target.col, `+${pointsPerStep}`, 'combo');
+          await sleep(145);
+        }
+        setMovesLeft(0);
+      } else {
+        // Even with 0 moves left, fire 3 celebratory center fireworks
+        for (let i = 0; i < 3; i++) {
+          if (!mountedRef.current) return;
+          const r = Math.min(level.rows - 1, Math.max(0, 1 + i * 2));
+          const c = Math.min(level.cols - 1, Math.max(0, 1 + ((i * 2) % level.cols)));
+          sound.playFirework(i);
+          pushEffect([{ id: `fw0_${i}`, kind: 'shockwave', row: r, col: c }]);
+          pushClearedBursts([{ id: `fw0c_${i}`, row: r, col: c, color: 'yellow' }]);
+          await sleep(160);
+        }
+      }
+
+      await sleep(420);
+      if (!mountedRef.current) return;
+      setVictoryBanner(null);
 
       const stars = computeStars(finalScore);
       const coinsEarned = 60 + stars * 30 + newMovesLeft * 10;
@@ -463,6 +572,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       setGoalProgress(newProg);
       pushEffect(step.effects);
       pushClearedBursts(step.clearedBursts);
+      pushGoalOrbs(step.goalOrbs);
       playSoundsForStep(step.triggeredPowerUps, step.hitObstacle, 0, 1);
 
       if (p1 && p2) {
@@ -481,7 +591,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     ]);
 
     if (clusters.length === 0 && !freeMove) {
-      // Visually glide toward each other, then bounce back!
       setBoard(swapped);
       sound.playInvalid();
       setInvalidPair(`${r1},${c1}|${r2},${c2}`);
@@ -505,7 +614,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       return;
     }
 
-    await sleep(165);
+    await sleep(180);
     if (!mountedRef.current) return;
 
     const step = resolveMatchClustersStep(swapped, clusters, level.goals, progressRef.current);
@@ -517,6 +626,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setGoalProgress(newProg);
     pushEffect(step.effects);
     pushClearedBursts(step.clearedBursts);
+    pushGoalOrbs(step.goalOrbs);
     playSoundsForStep(step.triggeredPowerUps, step.hitObstacle, step.spawnedPowerUps, 1);
 
     const anchor = clusters[0].cells[0];
@@ -554,6 +664,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setGoalProgress(newProg);
     pushEffect(step.effects);
     pushClearedBursts(step.clearedBursts);
+    pushGoalOrbs(step.goalOrbs);
     playSoundsForStep(step.triggeredPowerUps, step.hitObstacle, 0, 1);
     pushPopup(row, col, `+${step.scoreDelta}`, 'score');
 
@@ -614,6 +725,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       setGoalProgress(newProg);
       pushEffect(step.effects);
       pushClearedBursts(step.clearedBursts);
+      pushGoalOrbs(step.goalOrbs);
       playSoundsForStep(step.triggeredPowerUps, step.hitObstacle, 0, 1);
       await runCascadeAndFinalize(step.board, newProg, newScore, step.clearedHoneyCount, movesRef.current);
       return;
@@ -803,12 +915,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           {/* Row 2: Compact Goals + Score */}
           <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-200/10">
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              {level.goals.map((g) => {
+              {level.goals.map((g, idx) => {
                 const current = Math.min(g.target, goalProgress[g.type] || 0);
                 const done = current >= g.target;
+                const pulsing = goalPulseIdx === idx;
                 return (
-                  <div
+                  <motion.div
                     key={g.type}
+                    animate={pulsing ? { scale: [1, 1.2, 1] } : { scale: 1 }}
+                    transition={{ duration: 0.22 }}
                     className={`flex items-center gap-1.5 px-2 py-1 rounded-xl border shrink-0 transition-colors ${
                       done
                         ? 'bg-emerald-950/80 border-emerald-400/50 text-emerald-200'
@@ -819,7 +934,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     <span className="text-xs font-bold tabular-nums whitespace-nowrap">
                       {done ? '完成' : `${current}/${g.target}`}
                     </span>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
@@ -861,9 +976,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           )}
 
           <div
-            className={`relative p-2 rounded-3xl bg-[#34261F] border-2 border-[#5C4438] shadow-[0_18px_40px_rgba(0,0,0,0.65)] ${
-              shaking ? 'animate-board-shake' : ''
-            }`}
+            className={`relative p-2 rounded-3xl bg-[#34261F] border-2 transition-shadow duration-300 ${
+              comboBanner || victoryBanner
+                ? 'border-amber-400 shadow-[0_0_32px_rgba(251,191,36,0.4)]'
+                : 'border-[#5C4438] shadow-[0_18px_40px_rgba(0,0,0,0.65)]'
+            } ${shaking ? 'animate-board-shake' : ''}`}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
@@ -1229,6 +1346,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                   return null;
                 })}
 
+                {/* Flying Goal Orbs arching up toward HUD */}
+                {flyingOrbs.map((orb) => {
+                  const startTop = `${((orb.row + 0.5) / rows) * 100}%`;
+                  const startLeft = `${((orb.col + 0.5) / cols) * 100}%`;
+                  const targetLeft = `${15 + orb.targetIdx * 22}%`;
+                  return (
+                    <motion.div
+                      key={orb.id}
+                      initial={{ left: startLeft, top: startTop, scale: 1.15, opacity: 1 }}
+                      animate={{ left: targetLeft, top: '-12%', scale: 0.7, opacity: 0.25 }}
+                      transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+                      className="absolute -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]"
+                    >
+                      <GoalIcon type={orb.goalType} className="w-6 h-6" />
+                    </motion.div>
+                  );
+                })}
+
                 {/* Floating Score & Praise Popups */}
                 {popups.map((p) => (
                   <div
@@ -1248,6 +1383,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     {p.text}
                   </div>
                 ))}
+
+                {/* Center Cascade Combo Callout */}
+                {comboBanner && !victoryBanner && (
+                  <motion.div
+                    key={comboBanner}
+                    initial={{ scale: 0.65, opacity: 0 }}
+                    animate={{ scale: [0.65, 1.14, 1], opacity: 1 }}
+                    transition={{ duration: 0.28 }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-1.5 rounded-2xl bg-[#1C1613]/85 border border-amber-300/70 text-amber-200 font-display font-bold text-base shadow-[0_0_24px_rgba(251,191,36,0.45)] whitespace-nowrap"
+                  >
+                    {comboBanner}
+                  </motion.div>
+                )}
+
+                {/* Victory Celebration Banner */}
+                {victoryBanner && (
+                  <motion.div
+                    key={victoryBanner}
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: [0.5, 1.12, 1], opacity: 1 }}
+                    transition={{ duration: 0.32 }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 font-display font-extrabold text-lg shadow-[0_0_36px_rgba(251,191,36,0.75)] whitespace-nowrap"
+                  >
+                    {victoryBanner}
+                  </motion.div>
+                )}
               </div>
             </div>
           </div>

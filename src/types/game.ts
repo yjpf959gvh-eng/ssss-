@@ -97,6 +97,14 @@ export interface ClearedTileBurst {
   powerUp?: PowerUpType;
 }
 
+export interface FlyingGoalOrb {
+  id: string;
+  row: number;
+  col: number;
+  goalType: GoalType;
+  targetIdx: number; // index of goal badge in HUD
+}
+
 export interface VisualEffect {
   id: string;
   kind: 'beam_h' | 'beam_v' | 'shockwave' | 'spark_burst' | 'plane_fly' | 'rainbow_zap';

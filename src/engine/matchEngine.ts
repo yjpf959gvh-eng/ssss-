@@ -2,6 +2,7 @@ import {
   Board,
   Cell,
   ClearedTileBurst,
+  FlyingGoalOrb,
   GemColor,
   GoalType,
   LevelConfig,
@@ -550,6 +551,7 @@ export interface StepDelta {
   board: Board;
   scoreDelta: number;
   goalIncrements: Partial<Record<GoalType, number>>;
+  goalOrbs: FlyingGoalOrb[];
   effects: VisualEffect[];
   clearedBursts: ClearedTileBurst[];
   spawnedPowerUps: number;
@@ -570,6 +572,7 @@ export function resolveMatchClustersStep(
 
   let scoreDelta = 0;
   const goalIncrements: Partial<Record<GoalType, number>> = {};
+  const goalOrbs: FlyingGoalOrb[] = [];
   const effects: VisualEffect[] = [];
   const clearedBursts: ClearedTileBurst[] = [];
   const triggeredPowerUps: PowerUpType[] = [];
@@ -577,8 +580,18 @@ export function resolveMatchClustersStep(
   let hitObstacle = false;
   let clearedHoneyCount = 0;
 
-  const incGoal = (type: GoalType, amt = 1) => {
+  const incGoal = (type: GoalType, amt = 1, row = 0, col = 0) => {
     goalIncrements[type] = (goalIncrements[type] || 0) + amt;
+    const idx = goals.findIndex((g) => g.type === type);
+    if (idx !== -1 && (progress[type] || 0) < goals[idx].target && goalOrbs.length < 14) {
+      goalOrbs.push({
+        id: `orb_${row}_${col}_${Math.random().toString(36).slice(2, 6)}`,
+        row,
+        col,
+        goalType: type,
+        targetIdx: idx,
+      });
+    }
   };
 
   const blastedKeys = new Set<string>();
@@ -595,19 +608,19 @@ export function resolveMatchClustersStep(
 
       if (touchesCarpet && !cell.carpet && cell.active) {
         cell.carpet = true;
-        incGoal('spread_carpet', 1);
+        incGoal('spread_carpet', 1, row, col);
       }
 
       if (cell.iceHp > 0) {
         cell.iceHp -= 1;
         hitObstacle = true;
-        if (cell.iceHp === 0) incGoal('clear_ice', 1);
+        if (cell.iceHp === 0) incGoal('clear_ice', 1, row, col);
       }
 
       if (cell.chained) {
         cell.chained = false;
         hitObstacle = true;
-        incGoal('clear_chain', 1);
+        incGoal('clear_chain', 1, row, col);
       }
 
       if (cell.tile?.powerUp && !triggeredPowerIds.has(cell.tile.id)) {
@@ -616,7 +629,7 @@ export function resolveMatchClustersStep(
       }
 
       if (cell.tile?.color) {
-        incGoal(`collect_${cell.tile.color}` as GoalType, 1);
+        incGoal(`collect_${cell.tile.color}` as GoalType, 1, row, col);
       }
 
       const isSpawn =
@@ -665,7 +678,7 @@ export function resolveMatchClustersStep(
           hitObstacle = true;
           scoreDelta += 60;
           clearedBursts.push({ id: `crate_${ar}_${ac}_${Date.now()}`, row: ar, col: ac, color: 'orange' });
-          if (adjCell.crateHp === 0) incGoal('clear_crate', 1);
+          if (adjCell.crateHp === 0) incGoal('clear_crate', 1, ar, ac);
         } else if (adjCell.honey) {
           blastedKeys.add(`adj_${adjKey}`);
           adjCell.honey = false;
@@ -673,7 +686,7 @@ export function resolveMatchClustersStep(
           clearedHoneyCount++;
           scoreDelta += 80;
           clearedBursts.push({ id: `honey_${ar}_${ac}_${Date.now()}`, row: ar, col: ac, color: 'yellow' });
-          incGoal('clear_honey', 1);
+          incGoal('clear_honey', 1, ar, ac);
         }
       }
     }
@@ -686,7 +699,7 @@ export function resolveMatchClustersStep(
 
     if (spreadCarpetFlag && !cell.carpet) {
       cell.carpet = true;
-      incGoal('spread_carpet', 1);
+      incGoal('spread_carpet', 1, r, c);
     }
 
     if (cell.crateHp > 0) {
@@ -694,7 +707,7 @@ export function resolveMatchClustersStep(
       hitObstacle = true;
       scoreDelta += 60;
       clearedBursts.push({ id: `crate_${r}_${c}_${Math.random()}`, row: r, col: c, color: 'orange' });
-      if (cell.crateHp === 0) incGoal('clear_crate', 1);
+      if (cell.crateHp === 0) incGoal('clear_crate', 1, r, c);
       return;
     }
 
@@ -704,20 +717,20 @@ export function resolveMatchClustersStep(
       clearedHoneyCount++;
       scoreDelta += 80;
       clearedBursts.push({ id: `honey_${r}_${c}_${Math.random()}`, row: r, col: c, color: 'yellow' });
-      incGoal('clear_honey', 1);
+      incGoal('clear_honey', 1, r, c);
       return;
     }
 
     if (cell.iceHp > 0) {
       cell.iceHp -= 1;
       hitObstacle = true;
-      if (cell.iceHp === 0) incGoal('clear_ice', 1);
+      if (cell.iceHp === 0) incGoal('clear_ice', 1, r, c);
     }
 
     if (cell.chained) {
       cell.chained = false;
       hitObstacle = true;
-      incGoal('clear_chain', 1);
+      incGoal('clear_chain', 1, r, c);
     }
 
     if (cell.tile) {
@@ -726,7 +739,7 @@ export function resolveMatchClustersStep(
         powerQueue.push({ row: r, col: c, powerUp: cell.tile.powerUp, color: cell.tile.color });
       }
       if (cell.tile.color) {
-        incGoal(`collect_${cell.tile.color}` as GoalType, 1);
+        incGoal(`collect_${cell.tile.color}` as GoalType, 1, r, c);
       }
       scoreDelta += 40;
       clearedBursts.push({
@@ -831,6 +844,7 @@ export function resolveMatchClustersStep(
     board: next,
     scoreDelta,
     goalIncrements,
+    goalOrbs,
     effects,
     clearedBursts,
     spawnedPowerUps,
@@ -855,14 +869,25 @@ export function resolvePowerUpActivationOrCombo(
 
   let scoreDelta = 0;
   const goalIncrements: Partial<Record<GoalType, number>> = {};
+  const goalOrbs: FlyingGoalOrb[] = [];
   const effects: VisualEffect[] = [];
   const clearedBursts: ClearedTileBurst[] = [];
   const triggeredPowerUps: PowerUpType[] = [];
   let hitObstacle = false;
   let clearedHoneyCount = 0;
 
-  const incGoal = (type: GoalType, amt = 1) => {
+  const incGoal = (type: GoalType, amt = 1, row = 0, col = 0) => {
     goalIncrements[type] = (goalIncrements[type] || 0) + amt;
+    const idx = goals.findIndex((g) => g.type === type);
+    if (idx !== -1 && (progress[type] || 0) < goals[idx].target && goalOrbs.length < 14) {
+      goalOrbs.push({
+        id: `orb_${row}_${col}_${Math.random().toString(36).slice(2, 6)}`,
+        row,
+        col,
+        goalType: type,
+        targetIdx: idx,
+      });
+    }
   };
 
   const triggeredPowerIds = new Set<string>();
@@ -875,7 +900,7 @@ export function resolvePowerUpActivationOrCombo(
 
     if (spreadCarpetFlag && !cell.carpet) {
       cell.carpet = true;
-      incGoal('spread_carpet', 1);
+      incGoal('spread_carpet', 1, r, c);
     }
 
     if (cell.crateHp > 0) {
@@ -883,7 +908,7 @@ export function resolvePowerUpActivationOrCombo(
       hitObstacle = true;
       scoreDelta += 65;
       clearedBursts.push({ id: `crate_${r}_${c}_${Math.random()}`, row: r, col: c, color: 'orange' });
-      if (cell.crateHp === 0) incGoal('clear_crate', 1);
+      if (cell.crateHp === 0) incGoal('clear_crate', 1, r, c);
       return;
     }
 
@@ -893,20 +918,20 @@ export function resolvePowerUpActivationOrCombo(
       clearedHoneyCount++;
       scoreDelta += 85;
       clearedBursts.push({ id: `honey_${r}_${c}_${Math.random()}`, row: r, col: c, color: 'yellow' });
-      incGoal('clear_honey', 1);
+      incGoal('clear_honey', 1, r, c);
       return;
     }
 
     if (cell.iceHp > 0) {
       cell.iceHp -= 1;
       hitObstacle = true;
-      if (cell.iceHp === 0) incGoal('clear_ice', 1);
+      if (cell.iceHp === 0) incGoal('clear_ice', 1, r, c);
     }
 
     if (cell.chained) {
       cell.chained = false;
       hitObstacle = true;
-      incGoal('clear_chain', 1);
+      incGoal('clear_chain', 1, r, c);
     }
 
     if (cell.tile) {
@@ -915,7 +940,7 @@ export function resolvePowerUpActivationOrCombo(
         chainQueue.push({ row: r, col: c, powerUp: cell.tile.powerUp, color: cell.tile.color });
       }
       if (cell.tile.color) {
-        incGoal(`collect_${cell.tile.color}` as GoalType, 1);
+        incGoal(`collect_${cell.tile.color}` as GoalType, 1, r, c);
       }
       scoreDelta += 45;
       clearedBursts.push({
@@ -1180,6 +1205,7 @@ export function resolvePowerUpActivationOrCombo(
     board: next,
     scoreDelta,
     goalIncrements,
+    goalOrbs,
     effects,
     clearedBursts,
     spawnedPowerUps: 0,
